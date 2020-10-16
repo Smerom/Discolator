@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/Smerom/Disclator/characterTracker"
+
 	translate "cloud.google.com/go/translate/apiv3"
 	"github.com/bwmarrin/discordgo"
 	translatepb "google.golang.org/genproto/googleapis/cloud/translate/v3"
@@ -19,14 +21,20 @@ var (
 	Token   string
 	Dev     string
 	Project string
+	MaxChar int
 )
+
+var ct characterTracker.Tracker
 
 func init() {
 
 	flag.StringVar(&Token, "t", "", "Bot Token")
 	flag.StringVar(&Dev, "d", "", "Dev ID")
 	flag.StringVar(&Project, "p", "", "Project ID")
+	flag.IntVar(&MaxChar, "maxchar", 500000, "Max character count")
 	flag.Parse()
+
+	ct = characterTracker.NewMemoryTracker()
 }
 
 func main() {
@@ -78,6 +86,15 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
+	// check translation count
+	if ct.CountAfterString(m.Content) > MaxChar {
+		log.Printf("Exceeds translation count")
+
+		// message with count exceeded
+		s.ChannelMessageSend(m.ChannelID, "Translation character count exceeded.")
+		return
+	}
+
 	ctx := context.Background()
 	c, err := translate.NewTranslationClient(ctx)
 	if err != nil {
@@ -92,6 +109,9 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		TargetLanguageCode: "ru",
 		Parent:             fmt.Sprintf("projects/%s", Project),
 	}
+
+	// add character count to tracker
+	ct.AddCharacters(m.Content)
 
 	resp, err := c.TranslateText(ctx, req)
 	if err != nil {
